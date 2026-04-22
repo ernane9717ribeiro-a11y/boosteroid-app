@@ -1,3 +1,80 @@
+#!/bin/bash
+# ============================================================
+# update_app.sh  –  Substitui o app por WebView + controles touch
+# Execute: bash update_app.sh
+# ============================================================
+set -e
+cd ~/boosteroid_app || { echo "❌ Pasta ~/boosteroid_app não encontrada"; exit 1; }
+
+echo "📝 Atualizando pubspec.yaml..."
+cat > pubspec.yaml << 'YAML'
+name: boosteroid_app
+description: Boosteroid Cloud Gaming with Touch Controls
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  webview_flutter: ^4.7.0
+  webview_flutter_android: ^3.16.0
+  vibration: ^1.9.0
+  wakelock_plus: ^1.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+YAML
+
+echo "📝 Atualizando AndroidManifest.xml..."
+mkdir -p android/app/src/main
+cat > android/app/src/main/AndroidManifest.xml << 'XML'
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.example.boosteroid_app">
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.VIBRATE"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <application
+        android:label="Boosteroid"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:allowBackup="false"
+        android:hardwareAccelerated="true"
+        android:usesCleartextTraffic="true"
+        android:theme="@style/LaunchTheme">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <meta-data
+              android:name="io.flutter.embedding.android.NormalTheme"
+              android:resource="@style/NormalTheme"/>
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+        <meta-data android:name="flutterEmbedding" android:value="2"/>
+    </application>
+</manifest>
+XML
+
+echo "📝 Atualizando lib/main.dart..."
+mkdir -p lib
+
+cat > lib/main.dart << 'DARTEOF'
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -376,3 +453,14 @@ class _MenuBtn extends StatelessWidget {
   }
 }
 
+DARTEOF
+echo "main.dart escrito!"
+
+echo ""
+echo "📦 Fazendo git add e commit..."
+git add -A
+git commit -m "feat: WebView + native touch gamepad overlay (Opção 2)"
+git push
+echo ""
+echo "✅ PUSH FEITO! Aguarde o GitHub Actions compilar (~5 min)"
+echo "   https://github.com/ernane9717ribeiro-a11y/boosteroid-app/actions"
