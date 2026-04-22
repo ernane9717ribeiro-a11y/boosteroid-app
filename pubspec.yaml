@@ -1,0 +1,39 @@
+name: boosteroid_app
+description: Boosteroid Cloud Gaming App with Touch Controls
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # WebView para o stream do Boosteroid (browser-based)
+  webview_flutter: ^4.4.2
+  webview_flutter_android: ^3.12.1
+
+  # HTTP requests
+  http: ^1.1.0
+
+  # Armazenamento local (login, preferências)
+  shared_preferences: ^2.2.2
+
+  # Controle de orientação e imersão
+  # (já incluído via flutter/services.dart)
+
+  # Ícones e UI
+  cupertino_icons: ^1.0.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+
+  # Adicionar assets se necessário
+  # assets:
+  #   - assets/images/
