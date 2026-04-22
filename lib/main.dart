@@ -7,7 +7,8 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
+  await SystemChrome.setPreferredOrientations(
+      [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   WakelockPlus.enable();
   runApp(const BoosteroidApp());
@@ -22,7 +23,7 @@ class BoosteroidApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: Colors.black,
-        colorScheme: const ColorScheme.dark(primary: Color(0xFF6C3FD4)),
+        colorScheme: const ColorScheme.dark(primary: Color(0xFF7C4DFF)),
       ),
       home: const StreamScreen(),
     );
@@ -40,10 +41,87 @@ class _StreamScreenState extends State<StreamScreen> {
   bool _showControls = true;
   bool _loading = true;
   bool _showHUD = true;
-  double _controlOpacity = 0.75;
+  double _controlOpacity = 0.80;
   final Set<String> _pressed = {};
   Offset _leftStick = Offset.zero;
   Offset _rightStick = Offset.zero;
+
+  // JS que injeta o handler global de input no WebView
+  static const String _inputBridgeJS = r"""
+  (function() {
+    if (window.__boosteroidBridge) return;
+    window.__boosteroidBridge = true;
+
+    // Encontra o elemento alvo: canvas, video ou body
+    function getTarget() {
+      return document.querySelector('canvas') ||
+             document.querySelector('video') ||
+             document.querySelector('[class*="stream"]') ||
+             document.querySelector('[id*="stream"]') ||
+             document.body;
+    }
+
+    window.__sendKey = function(key, type) {
+      var t = getTarget();
+      var opts = {key: key, code: key, keyCode: 0, which: 0, bubbles: true, cancelable: true, composed: true};
+      var keyMap = {
+        'w':87,'a':65,'s':83,'d':68,
+        'ArrowUp':38,'ArrowDown':40,'ArrowLeft':37,'ArrowRight':39,
+        ' ':32,'Enter':13,'Escape':27,'Tab':9,
+        'Shift':16,'Control':17,'Alt':18,
+        'q':81,'e':69,'r':82,'f':70,'g':71,
+        'x':88,'y':89,'z':90,'c':67,'v':86
+      };
+      opts.keyCode = keyMap[key] || 0;
+      opts.which = opts.keyCode;
+      [document, t].forEach(function(el) {
+        try { el.dispatchEvent(new KeyboardEvent(type, opts)); } catch(e){}
+      });
+    };
+
+    window.__sendMouse = function(dx, dy) {
+      var t = getTarget();
+      var opts = {
+        movementX: dx, movementY: dy,
+        clientX: window.innerWidth/2, clientY: window.innerHeight/2,
+        bubbles: true, cancelable: true, composed: true
+      };
+      [document, t].forEach(function(el) {
+        try { el.dispatchEvent(new MouseEvent('mousemove', opts)); } catch(e){}
+      });
+    };
+
+    window.__sendMouseBtn = function(type) {
+      var t = getTarget();
+      var opts = {button:0, buttons:1, clientX: window.innerWidth/2, clientY: window.innerHeight/2, bubbles:true, cancelable:true, composed:true};
+      [document, t].forEach(function(el) {
+        try { el.dispatchEvent(new MouseEvent(type, opts)); } catch(e){}
+      });
+    };
+
+    // Tenta pointer lock no canvas/video para FPS
+    window.__requestPointerLock = function() {
+      var t = getTarget();
+      if (t && t.requestPointerLock) {
+        try { t.requestPointerLock(); } catch(e){}
+      }
+    };
+
+    console.log('[Boosteroid Bridge] Iniciado no elemento:', getTarget()?.tagName);
+  })();
+  """;
+
+  static const String _cssJS = r"""
+  (function() {
+    var s = document.createElement('style');
+    s.textContent = "header,footer,nav,[class*='banner'],[class*='cookie'],[class*='popup'],[class*='notification']{display:none!important}body{overflow:hidden!important;margin:0!important}canvas,video{width:100vw!important;height:100vh!important;object-fit:contain!important;display:block!important}";
+    document.head.appendChild(s);
+    setTimeout(function(){
+      var f = document.querySelector('[class*="fullscreen"],[aria-label*="full"],[title*="full"]');
+      if(f) f.click();
+    }, 3000);
+  })();
+  """;
 
   @override
   void initState() {
@@ -55,139 +133,243 @@ class _StreamScreenState extends State<StreamScreen> {
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(Colors.black)
-      ..setUserAgent('Mozilla/5.0 (Linux; Android 13; Poco X7 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36')
+      ..setUserAgent(
+          'Mozilla/5.0 (Linux; Android 13; Poco X7 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36')
       ..setNavigationDelegate(NavigationDelegate(
         onPageStarted: (_) => setState(() => _loading = true),
-        onPageFinished: (_) { setState(() => _loading = false); _injectCSS(); },
+        onPageFinished: (_) async {
+          setState(() => _loading = false);
+          await Future.delayed(const Duration(milliseconds: 800));
+          _controller.runJavaScript(_cssJS);
+          await Future.delayed(const Duration(milliseconds: 500));
+          _controller.runJavaScript(_inputBridgeJS);
+        },
       ))
       ..loadRequest(Uri.parse('https://boosteroid.com'));
   }
 
-  void _injectCSS() {
-    _controller.runJavaScript('''
-      (function() {
-        var s = document.createElement('style');
-        s.textContent = "header,footer,nav,[class*='banner'],[class*='cookie'],[class*='popup']{display:none!important}body{overflow:hidden!important}video{width:100vw!important;height:100vh!important;object-fit:contain!important}";
-        document.head.appendChild(s);
-        setTimeout(function(){
-          var f=document.querySelector('[class*="fullscreen"],[aria-label*="full"],[title*="full"]');
-          if(f)f.click();
-        },3000);
-      })();
-    ''');
-  }
-
   void _vibrate() async {
     if (await Vibration.hasVibrator() ?? false) {
-      Vibration.vibrate(duration: 25, amplitude: 80);
+      Vibration.vibrate(duration: 20, amplitude: 100);
     }
   }
 
   void _sendKey(String key, bool down) {
-    _controller.runJavaScript('''
-      (function(){var e=new KeyboardEvent('${down ? "keydown" : "keyup"}',{key:'$key',bubbles:true,cancelable:true});document.dispatchEvent(e);if(document.activeElement)document.activeElement.dispatchEvent(e);})();
-    ''');
+    final type = down ? 'keydown' : 'keyup';
+    _controller.runJavaScript('window.__sendKey && window.__sendKey("$key","$type");');
   }
 
   void _sendMouseMove(double dx, double dy) {
-    if (dx.abs() < 0.08 && dy.abs() < 0.08) return;
-    _controller.runJavaScript('''
-      (function(){var e=new MouseEvent('mousemove',{movementX:${(dx*18).toInt()},movementY:${(dy*18).toInt()},bubbles:true});document.dispatchEvent(e);})();
-    ''');
+    if (dx.abs() < 0.06 && dy.abs() < 0.06) return;
+    final mx = (dx * 22).toInt();
+    final my = (dy * 22).toInt();
+    _controller.runJavaScript('window.__sendMouse && window.__sendMouse($mx,$my);');
+  }
+
+  void _sendMouseBtn(bool down) {
+    final t = down ? 'mousedown' : 'mouseup';
+    _controller.runJavaScript('window.__sendMouseBtn && window.__sendMouseBtn("$t");');
+  }
+
+  void _requestPointerLock() {
+    _controller.runJavaScript('window.__requestPointerLock && window.__requestPointerLock();');
+  }
+
+  static const _keyMap = {
+    'A': 'Enter',
+    'B': 'Escape',
+    'X': 'r',
+    'Y': 'g',
+    'L1': 'q',
+    'R1': 'e',
+    'L2': 'Shift',
+    'R2': 'FIRE',
+    'START': 'Escape',
+    'SELECT': 'Tab',
+    'UP': 'ArrowUp',
+    'DOWN': 'ArrowDown',
+    'LEFT': 'ArrowLeft',
+    'RIGHT': 'ArrowRight',
+  };
+
+  void _handleDown(String b) {
+    if (b == 'R2') {
+      _sendMouseBtn(true);
+      return;
+    }
+    final k = _keyMap[b];
+    if (k != null) _sendKey(k, true);
+  }
+
+  void _handleUp(String b) {
+    if (b == 'R2') {
+      _sendMouseBtn(false);
+      return;
+    }
+    final k = _keyMap[b];
+    if (k != null) _sendKey(k, false);
+  }
+
+  void _handleLeft(Offset o) {
+    _sendKey('d', o.dx > 0.4);
+    _sendKey('a', o.dx < -0.4);
+    _sendKey('s', o.dy > 0.4);
+    _sendKey('w', o.dy < -0.4);
   }
 
   @override
-  void dispose() { WakelockPlus.disable(); super.dispose(); }
+  void dispose() {
+    WakelockPlus.disable();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(children: [
-        Positioned.fill(child: WebViewWidget(controller: _controller)),
+        Positioned.fill(child: GestureDetector(
+          onTap: _requestPointerLock,
+          child: WebViewWidget(controller: _controller),
+        )),
         if (_loading)
-          Container(color: Colors.black, child: const Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-            CircularProgressIndicator(color: Color(0xFF6C3FD4)),
-            SizedBox(height: 16),
-            Text('Conectando ao Boosteroid...', style: TextStyle(color: Colors.white70)),
-          ]))),
+          Container(
+              color: Colors.black,
+              child: Center(
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                SizedBox(
+                    width: 60,
+                    height: 60,
+                    child: CircularProgressIndicator(
+                        color: const Color(0xFF7C4DFF), strokeWidth: 3)),
+                const SizedBox(height: 20),
+                const Text('Conectando ao Boosteroid...',
+                    style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 14,
+                        letterSpacing: 1)),
+              ]))),
         if (_showControls && !_loading)
           Positioned.fill(
-            child: AnimatedOpacity(
-              opacity: _controlOpacity,
-              duration: const Duration(milliseconds: 300),
-              child: _GamepadOverlay(
-                pressed: _pressed, leftStick: _leftStick, rightStick: _rightStick,
-                onButtonDown: (b) { setState(() => _pressed.add(b)); _vibrate(); _handleDown(b); },
-                onButtonUp: (b) { setState(() => _pressed.remove(b)); _handleUp(b); },
-                onLeftStick: (o) { setState(() => _leftStick = o); _handleLeft(o); },
-                onRightStick: (o) { setState(() => _rightStick = o); _sendMouseMove(o.dx, o.dy); },
-              ),
+              child: AnimatedOpacity(
+            opacity: _controlOpacity,
+            duration: const Duration(milliseconds: 300),
+            child: _GamepadOverlay(
+              pressed: _pressed,
+              leftStick: _leftStick,
+              rightStick: _rightStick,
+              onButtonDown: (b) {
+                setState(() => _pressed.add(b));
+                _vibrate();
+                _handleDown(b);
+              },
+              onButtonUp: (b) {
+                setState(() => _pressed.remove(b));
+                _handleUp(b);
+              },
+              onLeftStick: (o) {
+                setState(() => _leftStick = o);
+                _handleLeft(o);
+              },
+              onRightStick: (o) {
+                setState(() => _rightStick = o);
+                _sendMouseMove(o.dx, o.dy);
+              },
             ),
-          ),
+          )),
         if (_showHUD)
-          Positioned(top: 0, left: 0, right: 0,
-            child: _HUDBar(
-              showControls: _showControls, opacity: _controlOpacity,
-              onToggleControls: () => setState(() => _showControls = !_showControls),
-              onBack: () => _controller.goBack(),
-              onRefresh: () { setState(() => _loading = true); _controller.reload(); },
-              onOpacity: (v) => setState(() => _controlOpacity = v),
-              onHide: () => setState(() => _showHUD = false),
-            )),
+          Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: _HUDBar(
+                showControls: _showControls,
+                opacity: _controlOpacity,
+                onToggleControls: () =>
+                    setState(() => _showControls = !_showControls),
+                onBack: () => _controller.goBack(),
+                onRefresh: () {
+                  setState(() => _loading = true);
+                  _controller.reload();
+                },
+                onOpacity: (v) => setState(() => _controlOpacity = v),
+                onHide: () => setState(() => _showHUD = false),
+                onPointerLock: _requestPointerLock,
+              )),
         if (!_showHUD)
-          Positioned(top: 8, right: 8,
-            child: GestureDetector(
-              onTap: () => setState(() => _showHUD = true),
-              child: Container(width: 32, height: 32,
-                decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(16)),
-                child: const Icon(Icons.menu, color: Colors.white54, size: 16)),
-            )),
+          Positioned(
+              top: 8,
+              right: 8,
+              child: GestureDetector(
+                  onTap: () => setState(() => _showHUD = true),
+                  child: Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                          color: const Color(0xAA000000),
+                          borderRadius: BorderRadius.circular(17),
+                          border: Border.all(
+                              color: const Color(0xFF7C4DFF), width: 1)),
+                      child: const Icon(Icons.menu,
+                          color: Colors.white70, size: 18)))),
       ]),
     );
   }
-
-  static const _keyMap = {
-    'A':'Enter','B':'Escape','X':'x','Y':'y',
-    'L1':'q','R1':'e','L2':'z','R2':'c',
-    'START':'Escape','SELECT':'Tab',
-    'UP':'ArrowUp','DOWN':'ArrowDown','LEFT':'ArrowLeft','RIGHT':'ArrowRight',
-  };
-  void _handleDown(String b) { if (_keyMap[b] != null) _sendKey(_keyMap[b]!, true); }
-  void _handleUp(String b) { if (_keyMap[b] != null) _sendKey(_keyMap[b]!, false); }
-  void _handleLeft(Offset o) {
-    _sendKey('ArrowRight', o.dx > 0.5); _sendKey('ArrowLeft', o.dx < -0.5);
-    _sendKey('ArrowDown', o.dy > 0.5); _sendKey('ArrowUp', o.dy < -0.5);
-  }
 }
 
+// ─── HUD Bar ────────────────────────────────────────────────
 class _HUDBar extends StatelessWidget {
-  final bool showControls; final double opacity;
-  final VoidCallback onToggleControls, onBack, onRefresh, onHide;
+  final bool showControls;
+  final double opacity;
+  final VoidCallback onToggleControls, onBack, onRefresh, onHide, onPointerLock;
   final ValueChanged<double> onOpacity;
-  const _HUDBar({required this.showControls, required this.opacity,
-    required this.onToggleControls, required this.onBack,
-    required this.onRefresh, required this.onOpacity, required this.onHide});
+  const _HUDBar(
+      {required this.showControls,
+      required this.opacity,
+      required this.onToggleControls,
+      required this.onBack,
+      required this.onRefresh,
+      required this.onOpacity,
+      required this.onHide,
+      required this.onPointerLock});
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 44,
-      decoration: const BoxDecoration(gradient: LinearGradient(
-        begin: Alignment.topCenter, end: Alignment.bottomCenter,
-        colors: [Color(0xCC000000), Colors.transparent])),
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      height: 46,
+      decoration: const BoxDecoration(
+          gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0xDD000000), Colors.transparent])),
+      padding: const EdgeInsets.symmetric(horizontal: 10),
       child: Row(children: [
-        _HBtn(Icons.arrow_back_ios, onBack),
+        _HBtn(Icons.arrow_back_ios_new, onBack),
         _HBtn(Icons.refresh, onRefresh),
+        _HBtn(Icons.mouse, onPointerLock, color: const Color(0xFF7C4DFF)),
         const Spacer(),
-        const Icon(Icons.sports_esports, color: Color(0xFF6C3FD4), size: 16),
+        const Icon(Icons.sports_esports, color: Color(0xFF7C4DFF), size: 14),
         const SizedBox(width: 4),
-        const Text('Boosteroid', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+        const Text('Boosteroid',
+            style: TextStyle(
+                color: Colors.white60,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 1)),
         const Spacer(),
-        SizedBox(width: 80, child: Slider(value: opacity, min: 0.2, max: 1.0,
-          activeColor: const Color(0xFF6C3FD4), inactiveColor: Colors.white24, onChanged: onOpacity)),
-        _HBtn(showControls ? Icons.gamepad : Icons.gamepad_outlined, onToggleControls,
-          color: showControls ? const Color(0xFF6C3FD4) : Colors.white54),
+        SizedBox(
+            width: 70,
+            height: 28,
+            child: Slider(
+                value: opacity,
+                min: 0.2,
+                max: 1.0,
+                activeColor: const Color(0xFF7C4DFF),
+                inactiveColor: Colors.white12,
+                onChanged: onOpacity)),
+        _HBtn(
+            showControls ? Icons.gamepad : Icons.gamepad_outlined,
+            onToggleControls,
+            color: showControls ? const Color(0xFF7C4DFF) : Colors.white38),
         _HBtn(Icons.keyboard_arrow_up, onHide),
       ]),
     );
@@ -195,184 +377,391 @@ class _HUDBar extends StatelessWidget {
 }
 
 class _HBtn extends StatelessWidget {
-  final IconData icon; final VoidCallback onTap; final Color color;
-  const _HBtn(this.icon, this.onTap, {this.color = Colors.white70});
+  final IconData icon;
+  final VoidCallback onTap;
+  final Color color;
+  const _HBtn(this.icon, this.onTap, {this.color = Colors.white60});
   @override
   Widget build(BuildContext context) => GestureDetector(
-    onTap: onTap,
-    child: Padding(padding: const EdgeInsets.symmetric(horizontal: 6),
-      child: Icon(icon, color: color, size: 20)));
+      onTap: onTap,
+      child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 5),
+          child: Icon(icon, color: color, size: 19)));
 }
 
+// ─── Gamepad Overlay ────────────────────────────────────────
 class _GamepadOverlay extends StatelessWidget {
-  final Set<String> pressed; final Offset leftStick, rightStick;
+  final Set<String> pressed;
+  final Offset leftStick, rightStick;
   final void Function(String) onButtonDown, onButtonUp;
   final void Function(Offset) onLeftStick, onRightStick;
-  const _GamepadOverlay({required this.pressed, required this.leftStick,
-    required this.rightStick, required this.onButtonDown, required this.onButtonUp,
-    required this.onLeftStick, required this.onRightStick});
+  const _GamepadOverlay(
+      {required this.pressed,
+      required this.leftStick,
+      required this.rightStick,
+      required this.onButtonDown,
+      required this.onButtonUp,
+      required this.onLeftStick,
+      required this.onRightStick});
+
   @override
   Widget build(BuildContext context) {
     final s = MediaQuery.of(context).size;
     return Stack(children: [
-      Positioned(left: 30, bottom: 40, child: _Joystick(size: 110, onMove: onLeftStick)),
-      Positioned(left: 170, bottom: 50, child: _DPad(pressed: pressed, onDown: onButtonDown, onUp: onButtonUp)),
-      Positioned(right: 170, bottom: 40, child: _Joystick(size: 110, onMove: onRightStick)),
-      Positioned(right: 30, bottom: 50, child: _ABXYPad(pressed: pressed, onDown: onButtonDown, onUp: onButtonUp)),
-      Positioned(left: 20, top: 20, child: Row(children: [
-        _ShoulderBtn('L2', pressed, onButtonDown, onButtonUp),
-        const SizedBox(width: 8),
-        _ShoulderBtn('L1', pressed, onButtonDown, onButtonUp),
-      ])),
-      Positioned(right: 20, top: 20, child: Row(children: [
-        _ShoulderBtn('R1', pressed, onButtonDown, onButtonUp),
-        const SizedBox(width: 8),
-        _ShoulderBtn('R2', pressed, onButtonDown, onButtonUp),
-      ])),
-      Positioned(left: s.width / 2 - 55, bottom: 18, child: Row(children: [
-        _MenuBtn('SELECT', pressed, onButtonDown, onButtonUp),
-        const SizedBox(width: 22),
-        _MenuBtn('START', pressed, onButtonDown, onButtonUp),
-      ])),
+      // Left joystick (WASD)
+      Positioned(
+          left: 24,
+          bottom: 36,
+          child: _Joystick(size: 120, label: 'L', onMove: onLeftStick)),
+      // D-Pad
+      Positioned(
+          left: 168,
+          bottom: 48,
+          child:
+              _DPad(pressed: pressed, onDown: onButtonDown, onUp: onButtonUp)),
+      // Right joystick (mouse/aim)
+      Positioned(
+          right: 168,
+          bottom: 36,
+          child: _Joystick(size: 120, label: 'R', onMove: onRightStick)),
+      // ABXY
+      Positioned(
+          right: 24,
+          bottom: 48,
+          child: _ABXYPad(
+              pressed: pressed, onDown: onButtonDown, onUp: onButtonUp)),
+      // Shoulder L
+      Positioned(
+          left: 16,
+          top: 50,
+          child: Column(children: [
+            _ShoulderBtn('L2', pressed, onButtonDown, onButtonUp),
+            const SizedBox(height: 6),
+            _ShoulderBtn('L1', pressed, onButtonDown, onButtonUp),
+          ])),
+      // Shoulder R
+      Positioned(
+          right: 16,
+          top: 50,
+          child: Column(children: [
+            _ShoulderBtn('R2', pressed, onButtonDown, onButtonUp,
+                highlight: true),
+            const SizedBox(height: 6),
+            _ShoulderBtn('R1', pressed, onButtonDown, onButtonUp),
+          ])),
+      // START / SELECT
+      Positioned(
+          left: s.width / 2 - 58,
+          bottom: 14,
+          child: Row(children: [
+            _MenuBtn('SELECT', pressed, onButtonDown, onButtonUp),
+            const SizedBox(width: 20),
+            _MenuBtn('START', pressed, onButtonDown, onButtonUp),
+          ])),
     ]);
   }
 }
 
+// ─── Joystick ───────────────────────────────────────────────
 class _Joystick extends StatefulWidget {
-  final double size; final void Function(Offset) onMove;
-  const _Joystick({required this.size, required this.onMove});
-  @override State<_Joystick> createState() => _JoystickState();
+  final double size;
+  final String label;
+  final void Function(Offset) onMove;
+  const _Joystick(
+      {required this.size, required this.label, required this.onMove});
+  @override
+  State<_Joystick> createState() => _JoystickState();
 }
+
 class _JoystickState extends State<_Joystick> {
-  Offset _pos = Offset.zero; Offset? _origin;
+  Offset _pos = Offset.zero;
+  Offset? _origin;
   @override
   Widget build(BuildContext context) {
-    final r = widget.size / 2; final kr = r * 0.38;
+    final r = widget.size / 2;
+    final kr = r * 0.36;
     return GestureDetector(
       onPanStart: (d) => _origin = d.localPosition,
       onPanUpdate: (d) {
         if (_origin == null) return;
         var delta = d.localPosition - _origin!;
         final dist = delta.distance;
-        if (dist > r * 0.7) delta = delta / dist * r * 0.7;
+        final maxR = r * 0.65;
+        if (dist > maxR) delta = delta / dist * maxR;
         setState(() => _pos = delta);
-        widget.onMove(Offset(delta.dx / (r * 0.7), delta.dy / (r * 0.7)));
+        widget.onMove(Offset(delta.dx / maxR, delta.dy / maxR));
       },
-      onPanEnd: (_) { setState(() => _pos = Offset.zero); _origin = null; widget.onMove(Offset.zero); },
-      child: SizedBox(width: widget.size, height: widget.size,
-        child: CustomPaint(painter: _JoystickPainter(_pos, r, kr))),
+      onPanEnd: (_) {
+        setState(() => _pos = Offset.zero);
+        _origin = null;
+        widget.onMove(Offset.zero);
+      },
+      child: SizedBox(
+          width: widget.size,
+          height: widget.size,
+          child: CustomPaint(
+              painter: _JoystickPainter(_pos, r, kr, widget.label))),
     );
   }
 }
+
 class _JoystickPainter extends CustomPainter {
-  final Offset pos; final double r, kr;
-  _JoystickPainter(this.pos, this.r, this.kr);
+  final Offset pos;
+  final double r, kr;
+  final String label;
+  _JoystickPainter(this.pos, this.r, this.kr, this.label);
+
   @override
   void paint(Canvas canvas, Size size) {
     final c = Offset(r, r);
-    canvas.drawCircle(c, r, Paint()..color = Colors.white.withOpacity(0.08));
-    canvas.drawCircle(c, r, Paint()..color = Colors.white.withOpacity(0.25)..style = PaintingStyle.stroke..strokeWidth = 1.5);
+    // Outer ring glow
+    canvas.drawCircle(
+        c,
+        r,
+        Paint()
+          ..color = const Color(0xFF7C4DFF).withOpacity(0.08)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8));
+    // Outer ring
+    canvas.drawCircle(
+        c,
+        r,
+        Paint()
+          ..color = const Color(0xFF7C4DFF).withOpacity(0.3)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5);
+    // Inner base
+    canvas.drawCircle(
+        c,
+        r * 0.55,
+        Paint()..color = Colors.white.withOpacity(0.04));
+    // Knob shadow
     final kc = c + pos;
-    canvas.drawCircle(kc, kr, Paint()..color = Colors.white.withOpacity(0.35));
-    canvas.drawCircle(kc, kr, Paint()..color = Colors.white.withOpacity(0.7)..style = PaintingStyle.stroke..strokeWidth = 1.5);
+    canvas.drawCircle(
+        kc + const Offset(2, 3),
+        kr,
+        Paint()
+          ..color = Colors.black.withOpacity(0.4)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6));
+    // Knob
+    final knobPaint = Paint()
+      ..shader = RadialGradient(colors: [
+        const Color(0xFF9E6FFF),
+        const Color(0xFF5B2FCC),
+      ]).createShader(Rect.fromCircle(center: kc, radius: kr));
+    canvas.drawCircle(kc, kr, knobPaint);
+    canvas.drawCircle(
+        kc,
+        kr,
+        Paint()
+          ..color = Colors.white.withOpacity(0.25)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.2);
+    // Label
+    final tp = TextPainter(
+        text: TextSpan(
+            text: label,
+            style: TextStyle(
+                color: Colors.white.withOpacity(0.5),
+                fontSize: 10,
+                fontWeight: FontWeight.w700)),
+        textDirection: TextDirection.ltr)
+      ..layout();
+    tp.paint(canvas, c - Offset(tp.width / 2, tp.height / 2));
   }
-  @override bool shouldRepaint(_JoystickPainter o) => o.pos != pos;
+
+  @override
+  bool shouldRepaint(_JoystickPainter o) => o.pos != pos;
 }
 
+// ─── D-Pad ──────────────────────────────────────────────────
 class _DPad extends StatelessWidget {
-  final Set<String> pressed; final void Function(String) onDown, onUp;
-  const _DPad({required this.pressed, required this.onDown, required this.onUp});
+  final Set<String> pressed;
+  final void Function(String) onDown, onUp;
+  const _DPad(
+      {required this.pressed, required this.onDown, required this.onUp});
+
   @override
-  Widget build(BuildContext context) => SizedBox(width: 90, height: 90, child: Stack(children: [
-    Positioned(top: 0, left: 27, child: _DBtn('UP', Icons.keyboard_arrow_up, pressed, onDown, onUp)),
-    Positioned(bottom: 0, left: 27, child: _DBtn('DOWN', Icons.keyboard_arrow_down, pressed, onDown, onUp)),
-    Positioned(left: 0, top: 27, child: _DBtn('LEFT', Icons.keyboard_arrow_left, pressed, onDown, onUp)),
-    Positioned(right: 0, top: 27, child: _DBtn('RIGHT', Icons.keyboard_arrow_right, pressed, onDown, onUp)),
-    Positioned(left: 27, top: 27, child: Container(width: 36, height: 36,
-      decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(4)))),
+  Widget build(BuildContext context) =>
+      SizedBox(width: 96, height: 96, child: Stack(children: [
+    Positioned(top: 0, left: 30, child: _DBtn('UP', Icons.keyboard_arrow_up, pressed, onDown, onUp)),
+    Positioned(bottom: 0, left: 30, child: _DBtn('DOWN', Icons.keyboard_arrow_down, pressed, onDown, onUp)),
+    Positioned(left: 0, top: 30, child: _DBtn('LEFT', Icons.keyboard_arrow_left, pressed, onDown, onUp)),
+    Positioned(right: 0, top: 30, child: _DBtn('RIGHT', Icons.keyboard_arrow_right, pressed, onDown, onUp)),
+    Positioned(left: 30, top: 30, child: Container(width: 36, height: 36,
+        decoration: BoxDecoration(color: Colors.white.withOpacity(0.05),
+            borderRadius: BorderRadius.circular(4)))),
   ]));
 }
+
 class _DBtn extends StatelessWidget {
-  final String label; final IconData icon; final Set<String> pressed;
+  final String label;
+  final IconData icon;
+  final Set<String> pressed;
   final void Function(String) onDown, onUp;
   const _DBtn(this.label, this.icon, this.pressed, this.onDown, this.onUp);
+
   @override
   Widget build(BuildContext context) {
     final active = pressed.contains(label);
     return GestureDetector(
-      onTapDown: (_) => onDown(label), onTapUp: (_) => onUp(label), onTapCancel: () => onUp(label),
-      child: Container(width: 36, height: 36,
-        decoration: BoxDecoration(color: active ? Colors.white30 : Colors.white10,
-          borderRadius: BorderRadius.circular(4)),
-        child: Icon(icon, color: Colors.white70, size: 20)));
+        onTapDown: (_) => onDown(label),
+        onTapUp: (_) => onUp(label),
+        onTapCancel: () => onUp(label),
+        child: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+                color: active
+                    ? const Color(0xFF7C4DFF).withOpacity(0.6)
+                    : Colors.white.withOpacity(0.07),
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(
+                    color: active
+                        ? const Color(0xFF7C4DFF)
+                        : Colors.white.withOpacity(0.15),
+                    width: 1)),
+            child: Icon(icon,
+                color: active ? Colors.white : Colors.white54, size: 20)));
   }
 }
 
+// ─── ABXY ───────────────────────────────────────────────────
 class _ABXYPad extends StatelessWidget {
-  final Set<String> pressed; final void Function(String) onDown, onUp;
-  const _ABXYPad({required this.pressed, required this.onDown, required this.onUp});
+  final Set<String> pressed;
+  final void Function(String) onDown, onUp;
+  const _ABXYPad(
+      {required this.pressed, required this.onDown, required this.onUp});
+
   @override
-  Widget build(BuildContext context) => SizedBox(width: 110, height: 110, child: Stack(children: [
-    Positioned(top: 0, left: 35, child: _FaceBtn('Y', Colors.yellow, pressed, onDown, onUp)),
-    Positioned(bottom: 0, left: 35, child: _FaceBtn('A', Colors.green, pressed, onDown, onUp)),
-    Positioned(left: 0, top: 35, child: _FaceBtn('X', Colors.blue, pressed, onDown, onUp)),
-    Positioned(right: 0, top: 35, child: _FaceBtn('B', Colors.red, pressed, onDown, onUp)),
+  Widget build(BuildContext context) =>
+      SizedBox(width: 116, height: 116, child: Stack(children: [
+    Positioned(top: 0, left: 37, child: _FaceBtn('Y', const Color(0xFFFFD600), pressed, onDown, onUp)),
+    Positioned(bottom: 0, left: 37, child: _FaceBtn('A', const Color(0xFF00E676), pressed, onDown, onUp)),
+    Positioned(left: 0, top: 37, child: _FaceBtn('X', const Color(0xFF2979FF), pressed, onDown, onUp)),
+    Positioned(right: 0, top: 37, child: _FaceBtn('B', const Color(0xFFFF1744), pressed, onDown, onUp)),
   ]));
 }
+
 class _FaceBtn extends StatelessWidget {
-  final String label; final Color color; final Set<String> pressed;
+  final String label;
+  final Color color;
+  final Set<String> pressed;
   final void Function(String) onDown, onUp;
   const _FaceBtn(this.label, this.color, this.pressed, this.onDown, this.onUp);
+
   @override
   Widget build(BuildContext context) {
     final active = pressed.contains(label);
     return GestureDetector(
-      onTapDown: (_) => onDown(label), onTapUp: (_) => onUp(label), onTapCancel: () => onUp(label),
-      child: Container(width: 38, height: 38,
-        decoration: BoxDecoration(shape: BoxShape.circle,
-          color: active ? color.withOpacity(0.7) : color.withOpacity(0.25),
-          border: Border.all(color: color.withOpacity(0.8), width: 1.5)),
-        child: Center(child: Text(label,
-          style: TextStyle(color: active ? Colors.white : color, fontSize: 13, fontWeight: FontWeight.bold)))));
+        onTapDown: (_) => onDown(label),
+        onTapUp: (_) => onUp(label),
+        onTapCancel: () => onUp(label),
+        child: AnimatedContainer(
+            duration: const Duration(milliseconds: 80),
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color:
+                    active ? color.withOpacity(0.85) : color.withOpacity(0.15),
+                border:
+                    Border.all(color: color.withOpacity(0.7), width: 1.5),
+                boxShadow: active
+                    ? [
+                        BoxShadow(
+                            color: color.withOpacity(0.5),
+                            blurRadius: 12,
+                            spreadRadius: 2)
+                      ]
+                    : null),
+            child: Center(
+                child: Text(label,
+                    style: TextStyle(
+                        color: active ? Colors.white : color,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold)))));
   }
 }
 
+// ─── Shoulder Buttons ───────────────────────────────────────
 class _ShoulderBtn extends StatelessWidget {
-  final String label; final Set<String> pressed;
+  final String label;
+  final Set<String> pressed;
   final void Function(String) onDown, onUp;
-  const _ShoulderBtn(this.label, this.pressed, this.onDown, this.onUp);
+  final bool highlight;
+  const _ShoulderBtn(this.label, this.pressed, this.onDown, this.onUp,
+      {this.highlight = false});
+
   @override
   Widget build(BuildContext context) {
     final active = pressed.contains(label);
+    final baseColor =
+        highlight ? const Color(0xFFFF1744) : const Color(0xFF7C4DFF);
     return GestureDetector(
-      onTapDown: (_) => onDown(label), onTapUp: (_) => onUp(label), onTapCancel: () => onUp(label),
-      child: Container(width: 52, height: 32,
-        decoration: BoxDecoration(
-          color: active ? const Color(0xFF6C3FD4) : Colors.white12,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.white24, width: 1)),
-        child: Center(child: Text(label,
-          style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)))));
+        onTapDown: (_) => onDown(label),
+        onTapUp: (_) => onUp(label),
+        onTapCancel: () => onUp(label),
+        child: AnimatedContainer(
+            duration: const Duration(milliseconds: 80),
+            width: 58,
+            height: 34,
+            decoration: BoxDecoration(
+                color: active ? baseColor : Colors.white.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                    color: active ? baseColor : Colors.white.withOpacity(0.2),
+                    width: 1.2),
+                boxShadow: active
+                    ? [
+                        BoxShadow(
+                            color: baseColor.withOpacity(0.5),
+                            blurRadius: 10,
+                            spreadRadius: 1)
+                      ]
+                    : null),
+            child: Center(
+                child: Text(label,
+                    style: TextStyle(
+                        color: active ? Colors.white : Colors.white60,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.5)))));
   }
 }
 
+// ─── Menu Buttons ───────────────────────────────────────────
 class _MenuBtn extends StatelessWidget {
-  final String label; final Set<String> pressed;
+  final String label;
+  final Set<String> pressed;
   final void Function(String) onDown, onUp;
   const _MenuBtn(this.label, this.pressed, this.onDown, this.onUp);
+
   @override
   Widget build(BuildContext context) {
     final active = pressed.contains(label);
     return GestureDetector(
-      onTapDown: (_) => onDown(label), onTapUp: (_) => onUp(label), onTapCancel: () => onUp(label),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: active ? Colors.white30 : Colors.white10,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Colors.white30, width: 1)),
-        child: Text(label, style: const TextStyle(
-          color: Colors.white70, fontSize: 9, fontWeight: FontWeight.w600, letterSpacing: 0.5))));
+        onTapDown: (_) => onDown(label),
+        onTapUp: (_) => onUp(label),
+        onTapCancel: () => onUp(label),
+        child: AnimatedContainer(
+            duration: const Duration(milliseconds: 80),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+                color: active
+                    ? const Color(0xFF7C4DFF).withOpacity(0.7)
+                    : Colors.white.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                    color: active
+                        ? const Color(0xFF7C4DFF)
+                        : Colors.white.withOpacity(0.2),
+                    width: 1)),
+            child: Text(label,
+                style: TextStyle(
+                    color: active ? Colors.white : Colors.white54,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1))));
   }
 }
-
