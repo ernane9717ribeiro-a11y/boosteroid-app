@@ -70,7 +70,6 @@ jobs:
           EOF
 
           # android/build.gradle
-          mkdir -p android
           cat > android/build.gradle << 'EOF'
           buildscript {
               ext.kotlin_version = '1.9.0'
@@ -101,7 +100,7 @@ jobs:
           }
           EOF
 
-          # android/app/build.gradle
+          # android/app/build.gradle — versões fixas, sem flutter.versionCode
           cat > android/app/build.gradle << EOF
           plugins {
               id "com.android.application"
@@ -111,7 +110,6 @@ jobs:
           android {
               namespace "$PKG"
               compileSdk 34
-              ndkVersion flutter.ndkVersion
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_1_8
                   targetCompatibility JavaVersion.VERSION_1_8
@@ -123,8 +121,8 @@ jobs:
                   applicationId "$PKG"
                   minSdk 21
                   targetSdk 34
-                  versionCode flutter.versionCode
-                  versionName flutter.versionName
+                  versionCode 1
+                  versionName "1.0"
               }
               buildTypes {
                   release {
@@ -162,7 +160,7 @@ jobs:
           include ":app"
           EOF
 
-          # android/gradle/wrapper/gradle-wrapper.properties
+          # gradle-wrapper.properties
           mkdir -p android/gradle/wrapper
           cat > android/gradle/wrapper/gradle-wrapper.properties << 'EOF'
           distributionBase=GRADLE_USER_HOME
@@ -172,14 +170,14 @@ jobs:
           distributionUrl=https\://services.gradle.org/distributions/gradle-8.3-bin.zip
           EOF
 
-          # android/gradle.properties
+          # gradle.properties
           cat > android/gradle.properties << 'EOF'
-          org.gradle.jvmargs=-Xmx4G -XX:MaxMetaspaceSize=2G -XX:+HeapDumpOnOutOfMemoryError
+          org.gradle.jvmargs=-Xmx4G -XX:MaxMetaspaceSize=2G
           android.useAndroidX=true
           android.enableJetifier=true
           EOF
 
-          # Res values
+          # styles.xml
           mkdir -p android/app/src/main/res/values
           cat > android/app/src/main/res/values/styles.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -193,9 +191,7 @@ jobs:
           </resources>
           EOF
 
-          echo "Estrutura Android criada com sucesso!"
-          ls -la android/
-          ls -la android/app/
+          echo "Estrutura criada!"
 
       - name: Baixar dependências
         run: flutter pub get
